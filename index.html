@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html>
+    <head>
+<style>
+#form {
+    text-align: center;
+    height: 80px;
+    visibility: hidden;
+}
+#container {
+    text-align: center;
+    margin-left: -960px;
+}
+#container svg, #container canvas {
+    position: absolute;
+    top: 80px;
+}
+svg {
+    background-color: #666;
+}
+svg text {
+    font-family: proxima-nova;
+    font-size: 12px;
+    fill: #666;
+}
+.countries {
+    fill: #222;
+}
+.airports {
+    fill: #666666;
+}
+#status {
+    position: fixed;
+    text-align: left;
+    padding: 10px;
+    margin-left: calc( 50% - 488px);
+    height: 80px;
+    bottom: 0px;
+    width: 940px;
+    background-color: #999;
+}
+</style>
+    </head>
+    <body>
+        <div id="form">
+            <select id="stat" name="stat" onchange="execute()">
+                <option value="totalConfirmed"> totalConfirmed </option>
+                <option value="totalDeaths"> totalDeaths </option>
+                <option value="totalRecovered"> totalRecovered </option>
+                <option value="totalRecoveredDelta"> totalRecoveredDelta </option>
+                <option value="totalDeathsDelta"> totalDeathsDelta </option>
+                <option value="totalConfirmedDelta"> totalConfirmedDelta </option>
+            </select>  
+            <input type="checkbox" id="showCities" name="showCities" value=true checked onchange="execute()">
+            <label for="showCities"> Show Cities </label><br>
+        </div>
+        <div id='container'>
+        </div>
+
+        <div id="status">
+            <b> Data API </b> : <a href="https://bing.com/covid/data">https://bing.com/covid/data</a> <br>
+            <b> HeatMap Library </b> : <a href="https://github.com/mourner/simpleheat">https://github.com/mourner/simpleheat</a> <br>
+            <b> D3 + simpleheat.js reference </b> : <a href="https://bl.ocks.org/patricksurry/803a131d4c34fde54b9fbb074341daa5">https://bl.ocks.org/patricksurry/803a131d4c34fde54b9fbb074341daa5</a> <br>
+        </div>
+        <script src="https://d3js.org/d3.v4.min.js"></script>
+        <script src="https://d3js.org/topojson.v1.min.js"></script>
+        <script src="simpleheat.js"></script>  <!-- from https://github.com/mourner/simpleheat -->
+        <script>
+
+const width = 960;
+const height = 600;
+showCityData = true;
+
+div = d3.select('#container');
+mapLayer = div.append('svg').attr('id', 'map').attr('width', width).attr('height', height);
+canvasLayer = div.append('canvas').attr('id', 'heatmap').attr('width', width).attr('height', height);
+
+var canvas = canvasLayer.node(),
+    context = canvas.getContext("2d");
+
+// context.globalAlpha = 0.5;
+
+var projection = d3.geoMercator().translate([width/2, height/2]),
+    path = d3.geoPath(projection),
+    airportMap;
+
+d3.queue()
+    .defer(d3.json, 'world-50m.json')
+    .defer(d3.csv, 'flexwatch.csv')
+    .defer(d3.request, 'https://cors-anywhere.herokuapp.com/https://bing.com/covid/data')
+    .await(ready);
+
+world = null;
+dests = null;
+responseData = null;
+
+function ready(error, worldData, destsData, response) {
+    world = worldData;
+    dests = destsData;
+    responseData = response;
+
+    document.getElementById('form').style.visibility = 'visible';
+    execute('totalConfirmed');
+}
+
+function execute(parameter) {
+
+    if(!parameter) 
+        parameter = document.getElementById('stat').value;
+
+        showCityData = document.getElementById('showCities').checked;
+
+    covidData = JSON.parse(responseData.response);
+    
+    var countries = topojson.feature(world, world.objects.countries).features;
+
+    countriesList = covidData.areas;
+    airports = countriesList.filter(country => { return country.areas.length == 0 });
+    covidData.areas.forEach(country => { airports = airports.concat(country.areas) });
+
+    //airports = covidData.areas;
+    airports.forEach(d => { d.coords = projection([d.long, d.lat]); })
+    airportMap = d3.map(airports, d => d.id);
+
+    mapLayer
+        .append('g')
+        .classed('countries', true)
+        .selectAll(".country")
+        .data(countries)
+        .enter()
+        .append("path")
+        .attr("class", "country")
+        .attr("d", path);
+
+    mapLayer
+    .append('g')
+    .classed('airports', true)
+    .selectAll('.airport')
+        .data(airports)
+    .enter().append('circle')
+        .attr('r', function(d) { return (showCityData ? 1 : 0); })
+            .attr('cx', function(d) { return d.coords && d.coords[0]; })
+            .attr('cy', function(d) { return d.coords && d.coords[1]; })
+
+    var heat = simpleheat(canvas);
+
+    // set data of [[x, y, value], ...] format
+    //heat.data(dests.map(d => {a = airportMap.get(d.id); return [a.coords[0], a.coords[1], +d.watches]}));
+    heat.data(airports.map(d => { return [d.coords[0], d.coords[1], +d[parameter]]}));
+
+    // set point radius and blur radius (25 and 15 by default)
+    heat.radius(10, 10);
+
+    // optionally customize gradient colors, e.g. below
+    // (would be nicer if d3 color scale worked here)
+    // heat.gradient({0: '#0000ff', 0.5: '#00ff00', 1: '#ff0000'});
+
+    // set maximum for domain
+    heat.max(d3.max(airports, d => +d[parameter]));
+
+    // draw into canvas, with minimum opacity threshold
+    heat.draw(0.05);
+
+    console.log(covidData);
+}
+        </script>
+    </body>
+</html>
